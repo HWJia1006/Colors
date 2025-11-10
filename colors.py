@@ -6,8 +6,132 @@ import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 import re
 
+
 # ... (你提供的所有辅助函数，如 load_colors, is_valid_hex_color, create_example_plots, create_color_palette_display 保持不变) ...
-#
+# 数据加载和处理函数
+@st.cache_data
+def load_colors(file_path="colors.txt"):
+    """加载并处理颜色数据"""
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        colors = [sorted(line.strip().split(",")) for line in lines if line.strip()]
+        # 去重
+        unique_colors = []
+        for c in colors:
+            if c not in unique_colors:
+                unique_colors.append(c)
+        # 按颜色数量排序
+        unique_colors.sort(key=len)
+        return unique_colors
+    except FileNotFoundError:
+        # 如果文件不存在，返回示例数据
+        return [
+            ["#4DBBD5", "#00A087"],
+            ["#4DBBD5", "#00A087", "#E64B35"],
+            ["#F39B7F", "#8491B4", "#91D1C2", "#DC0000"],
+            ["#3C5488", "#00A087", "#F39B7F", "#8491B4", "#91D1C2"],
+            ["#E64B35", "#4DBBD5", "#00A087", "#3C5488", "#F39B7F", "#8491B4"],
+        ]
+
+
+def is_valid_hex_color(color_str):
+    """验证HEX颜色代码"""
+    colors = re.split(r"[,，;、\s]+", color_str.strip())
+    colors = [c.strip() for c in colors if c.strip()]
+    valid_colors = []
+    for c in colors:
+        if re.match(r"^#[A-Fa-f0-9]{6}$", c):
+            valid_colors.append(c)
+    # 去重
+    valid_colors = list(dict.fromkeys(valid_colors))
+    return valid_colors if valid_colors and len(valid_colors) <= 16 else None
+
+
+def create_example_plots(colors, alpha=1.0):
+    """创建示例图表"""
+    n_colors = len(colors)
+    np.random.seed(42)
+
+    # 关闭之前的所有图表
+    plt.close("all")
+
+    fig = plt.figure(figsize=(10, 8))
+    gs = GridSpec(2, 2, figure=fig, hspace=0.35, wspace=0.35)
+
+    # 图1: 条形图
+    ax1 = fig.add_subplot(gs[0, 0])
+    categories = [chr(97 + i) for i in range(min(n_colors, 26))]
+    values = np.random.uniform(7, 10, n_colors)
+    bars = ax1.bar(categories, values, color=colors, edgecolor="black", alpha=alpha)
+    ax1.set_xlabel("x-axis")
+    ax1.set_ylabel("y-axis")
+    ax1.set_title("Bar Chart with outlines")
+    ax1.set_ylim(0, max(values) * 1.1)
+
+    # 图2: 箱线图
+    ax2 = fig.add_subplot(gs[0, 1])
+    box_data = [np.random.uniform(7, 10, 20) for _ in range(n_colors)]
+    bp = ax2.boxplot(box_data, labels=categories, patch_artist=True)
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(alpha)
+    ax2.set_xlabel("x-axis")
+    ax2.set_ylabel("y-axis")
+    ax2.set_title("Boxplot with outlines")
+
+    # 图3: 散点图
+    ax3 = fig.add_subplot(gs[1, 0])
+    for i, color in enumerate(colors):
+        x = np.random.uniform(0, 1, 30)
+        y = np.random.uniform(0, 1, 30)
+        ax3.scatter(
+            x,
+            y,
+            c=color,
+            s=100,
+            alpha=alpha,
+            edgecolors=color,
+            linewidth=1.5,
+            label=categories[i],
+        )
+    ax3.set_xlabel("x-axis")
+    ax3.set_ylabel("y-axis")
+    ax3.set_title("Scatterplot without outlines")
+    if n_colors <= 8:
+        ax3.legend(loc="best", fontsize=8, ncol=2)
+
+    # 图4: 折线图
+    ax4 = fig.add_subplot(gs[1, 1])
+    x = np.arange(1, 21)
+    for i, color in enumerate(colors):
+        y = (i + 1) + np.random.normal(0, 0.3, 20)
+        ax4.plot(x, y, color=color, linewidth=2, alpha=alpha, label=categories[i])
+    ax4.set_xlabel("x-axis")
+    ax4.set_ylabel("y-axis")
+    ax4.set_title("Line chart without outlines")
+    if n_colors <= 8:
+        ax4.legend(loc="best", fontsize=8, ncol=2)
+
+    return fig
+
+
+def create_color_palette_display(colors):
+    """创建颜色方案显示"""
+    plt.close("all")
+    fig, ax = plt.subplots(figsize=(10, 8))
+    n = len(colors)
+    for i, color in enumerate(colors):
+        ax.add_patch(
+            mpatches.Rectangle((0, n - i - 1), 1, 1, facecolor=color, edgecolor="black")
+        )
+        ax.text(1.1, n - i - 0.5, color, va="center", fontsize=12, family="monospace")
+    ax.set_xlim(0, 2.5)
+    ax.set_ylim(0, n)
+    ax.axis("off")
+    return fig
+
+
 # 页面配置
 st.set_page_config(page_title="科研绘图配色推荐器", page_icon="🎨", layout="wide")
 
