@@ -7,7 +7,6 @@ from matplotlib.gridspec import GridSpec
 import re
 
 
-# ... (你提供的所有辅助函数，如 load_colors, is_valid_hex_color, create_example_plots, create_color_palette_display 保持不变) ...
 # 数据加载和处理函数
 @st.cache_data
 def load_colors(file_path="colors.txt"):
@@ -135,6 +134,26 @@ def create_color_palette_display(colors):
 # 页面配置
 st.set_page_config(page_title="科研绘图配色推荐器", page_icon="🎨", layout="wide")
 
+
+def handle_button_click(selected_id, show_type, selected_num, display_start_id):
+    """
+    Callback function to update session state when a "Select" button is clicked.
+    This runs *before* the page rerenders, avoiding the APIException.
+    """
+    if show_type == "配色数据库方案id":
+        if selected_num == "全部":
+            relative_id = selected_id
+        else:
+            relative_id = selected_id - display_start_id
+    else:
+        # If in "custom" mode, switch to "all"
+        st.session_state.selected_num = "全部"
+        relative_id = selected_id
+
+    # This is safe because it runs *before* the slider is instantiated
+    st.session_state.slider_value = relative_id
+
+
 # 自定义CSS
 st.markdown(
     """
@@ -156,7 +175,6 @@ if "db_page" not in st.session_state:  # 为数据库表格添加分页
     st.session_state.db_page = 0
 
 
-# --- (这里是所有@st.cache_data函数) ---
 @st.cache_data
 def load_colors(file_path="colors.txt"):
     """加载并处理颜色数据"""
@@ -280,9 +298,7 @@ def create_color_palette_display(colors):
     return fig
 
 
-# --- (以下是修改后的 main() 函数) ---
-
-
+# 主程序
 def main():
     st.title("🎨 科研绘图配色推荐器")
 
@@ -362,10 +378,7 @@ def main():
                     st.session_state.slider_value += 1
 
         with col1:
-            # ID选择器
-            # 【重要修改】
-            # 将 st.slider 的 key 绑定到 'slider_value'
-            # 这样滑块和按钮就可以双向同步
+            # ID选择器 (已修复，可与按钮同步)
             st.slider(
                 "选择方案id",
                 min_value=0,
@@ -448,10 +461,9 @@ def main():
         else:
             st.error("请输入正确的颜色格式")
 
-    # --- (以下是修改后的表格部分) ---
-
+    # --- (配色数据库部分) ---
     st.markdown("---")
-    st.subheader("配色数据库（点击行可查看绘图效果）")
+    st.subheader("配色数据库")
 
     # 根据选择的数量筛选显示的数据
     if show_type == "配色数据库方案id":
@@ -468,7 +480,7 @@ def main():
         display_colors = colors_data
         display_start_id = 0
 
-    # 创建数据框
+    # 创建数据框 (我们仍然需要df来组织数据)
     df_data = []
     for i, colors in enumerate(display_colors):
         df_data.append(
@@ -476,93 +488,67 @@ def main():
                 "方案id": display_start_id + i,
                 "所含颜色数": len(colors),
                 "颜色HEX码": ", ".join(colors),
-                # "颜色预览": " ".join(["■"] * len(colors)) # 占位符
             }
         )
-
     df = pd.DataFrame(df_data)
 
-    # 使用st.dataframe实现 *可点击* 的表格
-    event = st.dataframe(
-        df,
-        use_container_width=True,  # 替换 width="stretch"
-        height=400,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="single-row",
-        column_config={  # 配置列名
-            "方案id": st.column_config.NumberColumn("方案id", width="small"),
-            "所含颜色数": st.column_config.NumberColumn("所含颜色数", width="small"),
-            "颜色HEX码": st.column_config.TextColumn("颜色HEX码", width="large"),
-        },
-    )
-
-    # 处理行选择事件
-    if len(event.selection.rows) > 0:
-        selected_row_idx = event.selection.rows[0]
-        selected_id = df.iloc[selected_row_idx]["方案id"]  # 确保使用正确的列名
-
-        # 计算相对ID
-        if show_type == "配色数据库方案id":
-            relative_id = selected_id - display_start_id
-            # 更新slider值
-            if relative_id != st.session_state.slider_value:
-                st.session_state.slider_value = relative_id
-                st.rerun()
-
-    # --- (【重要修改】为颜色预览添加分页) ---
-    st.markdown("**颜色预览（可滚动查看）**")
-
-    # 分页设置
-    PAGE_SIZE = 10
+    # --- 分页设置 ---
+    PAGE_SIZE = 10  # 每页显示10条
     total_rows = len(df)
     total_pages = int(np.ceil(total_rows / PAGE_SIZE))
 
     if total_pages > 0:
+        # 确保页码不溢出
+        if st.session_state.db_page >= total_pages:
+            st.session_state.db_page = total_pages - 1
+
         # 分页控件
-        page_col1, page_col2, page_col3 = st.columns([2, 3, 2])
+        page_col1, page_col2, page_col3, page_col4 = st.columns([3, 1, 1, 3])
         with page_col1:
+            st.markdown(f"总计 {total_rows} 条数据")
+        with page_col2:
             if st.button("⬅️ 上一页", key="prev_page"):
                 if st.session_state.db_page > 0:
                     st.session_state.db_page -= 1
-        with page_col2:
-            page_num_display = st.session_state.db_page + 1
-            st.markdown(
-                f"<div style='text-align: center; padding-top: 5px;'>页码: {page_num_display} / {total_pages}</div>",
-                unsafe_allow_html=True,
-            )
-
-            # 或者使用 st.number_input
-            # page_num = st.number_input("页码", min_value=1, max_value=total_pages, value=st.session_state.db_page + 1)
-            # st.session_state.db_page = page_num - 1
         with page_col3:
             if st.button("下一页 ➡️", key="next_page"):
                 if st.session_state.db_page < total_pages - 1:
                     st.session_state.db_page += 1
+        with page_col4:
+            st.markdown(
+                f"<div style='text-align: right; padding-top: 5px;'>页码: {st.session_state.db_page + 1} / {total_pages}</div>",
+                unsafe_allow_html=True,
+            )
 
         # 计算当前页的数据
-        start_idx = st.session_state.db_page * PAGE_SIZE
-        end_idx = min(start_idx + PAGE_SIZE, total_rows)
-        df_page = df.iloc[start_idx:end_idx]
+        start_idx_page = st.session_state.db_page * PAGE_SIZE
+        end_idx_page = min(start_idx_page + PAGE_SIZE, total_rows)
+        df_page = df.iloc[start_idx_page:end_idx_page]
 
         # 渲染表头
-        header_cols = st.columns([1, 2, 10])
+        header_cols = st.columns([1, 1, 4, 3, 1])
         with header_cols[0]:
             st.markdown("**方案id**")
         with header_cols[1]:
             st.markdown("**所含颜色数**")
         with header_cols[2]:
+            st.markdown("**颜色HEX码**")
+        with header_cols[3]:
             st.markdown("**颜色预览**")
+        with header_cols[4]:
+            st.markdown("**操作**")
         st.markdown("---")
 
-        # 渲染当前页的颜色预览
+        # 渲染当前页的列表
         for idx, row in df_page.iterrows():
-            cols = st.columns([1, 2, 10])
+            cols = st.columns([1, 1, 4, 3, 1])
             with cols[0]:
                 st.write(f"**{row['方案id']}**")
             with cols[1]:
                 st.write(f"{row['所含颜色数']}色")
             with cols[2]:
+                st.write(row["颜色HEX码"])
+            with cols[3]:
                 colors_list = row["颜色HEX码"].split(", ")
                 color_blocks = "".join(
                     [
@@ -571,10 +557,24 @@ def main():
                     ]
                 )
                 st.markdown(color_blocks, unsafe_allow_html=True)
+            with cols[4]:
+                # 【核心修改】
+                # 替换 if st.button(...) with st.button(on_click=...)
+                selected_id = row["方案id"]
+                st.button(
+                    "选择",
+                    key=f"select_{selected_id}",
+                    on_click=handle_button_click,  # 使用回调
+                    args=(
+                        selected_id,
+                        show_type,
+                        selected_num,
+                        display_start_id,
+                    ),  # 传递参数给回调
+                )
+
     else:
         st.write("当前筛选条件下无数据。")
-
-    st.info("💡 提示：点击上方表格中的任意行，即可在页面顶部查看该配色方案的绘图效果")
 
     # 页脚
     st.markdown("---")
@@ -583,9 +583,9 @@ def main():
         <div style='text-align: center; color: gray;'>
         <p>© 2021-2024, Lcpmgh, All rights reserved.</p>
         <p>
-        <a href='https://github.com/lcpmgh' target='_blank'>GitHub</a> | 
-        <a href='mailto:lcpmgh@gmail.com'>Email</a> | 
-        <a href='http://lcpmgh.com/' target='_blank'>Website</a>
+        <a href='https://github.com/HWJia1006' target='_blank'>GitHub</a> | 
+        <a href='mailto:hongwangj@gmail.com'>Email</a> | 
+        <a href='https://github.com/HWJia1006' target='_blank'>Website</a>
         </p>
         </div>
         """,
