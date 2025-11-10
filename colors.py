@@ -22,12 +22,10 @@ st.markdown(
 )
 
 # 初始化session state
-if "current_id" not in st.session_state:
-    st.session_state.current_id = 0
+if "slider_value" not in st.session_state:
+    st.session_state.slider_value = 0
 if "selected_num" not in st.session_state:
     st.session_state.selected_num = "全部"
-if "temp_id" not in st.session_state:
-    st.session_state.temp_id = 0
 
 
 # 数据加载和处理函数
@@ -154,20 +152,6 @@ def create_color_palette_display(colors):
     return fig
 
 
-# 回调函数
-def go_previous():
-    """上一个按钮的回调"""
-    if st.session_state.temp_id > 0:
-        st.session_state.temp_id -= 1
-
-
-def go_next():
-    """下一个按钮的回调"""
-    max_id = st.session_state.get("max_available_id", 0)
-    if st.session_state.temp_id < max_id:
-        st.session_state.temp_id += 1
-
-
 # 主程序
 def main():
     st.title("🎨 科研绘图配色推荐器")
@@ -206,13 +190,12 @@ def main():
                 if st.session_state.selected_num in num_options
                 else 0
             ),
-            key="num_selector",
         )
 
-        # 当数量选择改变时，重置ID
+        # 当数量选择改变时，重置滑块值
         if selected_num != st.session_state.selected_num:
             st.session_state.selected_num = selected_num
-            st.session_state.temp_id = 0
+            st.session_state.slider_value = 0
 
         # 根据选择的数量筛选
         if selected_num == "全部":
@@ -225,37 +208,43 @@ def main():
                 len(color_counts[k]) for k in sorted(color_counts.keys()) if k < num
             )
 
-        # 保存最大ID到session state供回调函数使用
-        st.session_state.max_available_id = len(available_colors) - 1
+        max_idx = len(available_colors) - 1
 
-        # 确保temp_id在有效范围内
-        if st.session_state.temp_id >= len(available_colors):
-            st.session_state.temp_id = 0
+        # 确保slider_value在有效范围内
+        if st.session_state.slider_value > max_idx:
+            st.session_state.slider_value = 0
 
         col1, col2 = st.columns([3, 1])
+
+        with col2:
+            st.write("")
+            st.write("")
+            st.write("")
+            # 上一个按钮
+            if st.button("⬅️ 上一个", key="prev_btn", use_container_width=True):
+                if st.session_state.slider_value > 0:
+                    st.session_state.slider_value -= 1
+
+            # 下一个按钮
+            if st.button("下一个 ➡️", key="next_btn", use_container_width=True):
+                if st.session_state.slider_value < max_idx:
+                    st.session_state.slider_value += 1
 
         with col1:
             # ID选择器
             color_id = st.slider(
                 "选择方案id",
                 min_value=0,
-                max_value=len(available_colors) - 1,
-                value=st.session_state.temp_id,
-                key="id_slider",
+                max_value=max_idx,
+                value=st.session_state.slider_value,
+                key="main_slider",
             )
-            # 同步slider的值到temp_id
-            st.session_state.temp_id = color_id
+            # 同步slider的变化
+            if color_id != st.session_state.slider_value:
+                st.session_state.slider_value = color_id
 
-        with col2:
-            st.write("")
-            st.write("")
-            st.write("")
-            # 使用回调函数的按钮
-            st.button("⬅️ 上一个", key="prev_btn", on_click=go_previous)
-            st.button("下一个 ➡️", key="next_btn", on_click=go_next)
-
-        selected_colors = available_colors[st.session_state.temp_id]
-        actual_id = start_idx + st.session_state.temp_id
+        selected_colors = available_colors[st.session_state.slider_value]
+        actual_id = start_idx + st.session_state.slider_value
 
     else:  # 自定义配色
         col1, col2 = st.columns([4, 1])
@@ -331,7 +320,7 @@ def main():
 
     # 配色数据库表格
     st.markdown("---")
-    st.subheader("配色数据库")
+    st.subheader("配色数据库（点击行可查看绘图效果）")
 
     # 根据选择的数量筛选显示的数据
     if show_type == "配色数据库方案id":
@@ -348,55 +337,63 @@ def main():
         display_colors = colors_data
         display_start_id = 0
 
-    # 创建数据框
+    # 创建数据框，添加颜色预览列
     df_data = []
     for i, colors in enumerate(display_colors):
+        # 创建颜色预览HTML
+        color_preview = " ".join([f"🟦" for _ in colors])  # 使用emoji作为占位符
         df_data.append(
             {
                 "ID": display_start_id + i,
                 "颜色数": len(colors),
                 "HEX码": ", ".join(colors),
-                "颜色预览": "█" * len(colors),
             }
         )
 
     df = pd.DataFrame(df_data)
 
-    # 为每一行添加颜色预览
-    st.markdown("**配色方案列表**")
+    # 使用dataframe的selection模式
+    event = st.dataframe(
+        df,
+        width="stretch",
+        height=400,
+        hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
+    )
 
-    # 使用列来显示每个配色方案
+    # 处理行选择事件
+    if len(event.selection.rows) > 0:
+        selected_row_idx = event.selection.rows[0]
+        selected_id = df.iloc[selected_row_idx]["ID"]
+
+        # 计算相对ID
+        if show_type == "配色数据库方案id":
+            relative_id = selected_id - display_start_id
+            # 更新slider值
+            if relative_id != st.session_state.slider_value:
+                st.session_state.slider_value = relative_id
+                st.rerun()
+
+    # 显示颜色预览（在表格下方）
+    st.markdown("**颜色预览**")
     for idx, row in df.iterrows():
-        cols = st.columns([1, 2, 8, 2])
-
+        cols = st.columns([1, 2, 10])
         with cols[0]:
-            st.write(f"**ID: {row['ID']}**")
-
+            st.write(f"**{row['ID']}**")
         with cols[1]:
-            st.write(f"颜色数: {row['颜色数']}")
-
+            st.write(f"{row['颜色数']}色")
         with cols[2]:
-            # 显示颜色预览
             colors_list = row["HEX码"].split(", ")
             color_blocks = "".join(
                 [
-                    f'<div style="width:20px;height:20px;background-color:{c};display:inline-block;margin-right:3px;border:1px solid black;"></div>'
+                    f'<div style="width:25px;height:25px;background-color:{c};display:inline-block;margin-right:3px;border:1px solid #666;"></div>'
                     for c in colors_list
                 ]
             )
             st.markdown(color_blocks, unsafe_allow_html=True)
 
-        with cols[3]:
-            # 添加查看按钮
-            if st.button(f"查看", key=f"view_{row['ID']}"):
-                # 计算在当前筛选下的相对ID
-                relative_id = row["ID"] - display_start_id
-                st.session_state.temp_id = relative_id
-                st.rerun()
-
-        st.divider()
-
-    st.info("💡 提示：点击配色方案旁的'查看'按钮，即可在上方查看该方案的绘图效果")
+    st.info("💡 提示：点击上方表格中的任意行，即可在页面顶部查看该配色方案的绘图效果")
 
     # 页脚
     st.markdown("---")
