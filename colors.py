@@ -6,6 +6,8 @@ import matplotlib.patches as mpatches
 from matplotlib.gridspec import GridSpec
 import re
 
+# ... (你提供的所有辅助函数，如 load_colors, is_valid_hex_color, create_example_plots, create_color_palette_display 保持不变) ...
+#
 # 页面配置
 st.set_page_config(page_title="科研绘图配色推荐器", page_icon="🎨", layout="wide")
 
@@ -26,9 +28,11 @@ if "slider_value" not in st.session_state:
     st.session_state.slider_value = 0
 if "selected_num" not in st.session_state:
     st.session_state.selected_num = "全部"
+if "db_page" not in st.session_state:  # 为数据库表格添加分页
+    st.session_state.db_page = 0
 
 
-# 数据加载和处理函数
+# --- (这里是所有@st.cache_data函数) ---
 @st.cache_data
 def load_colors(file_path="colors.txt"):
     """加载并处理颜色数据"""
@@ -152,7 +156,9 @@ def create_color_palette_display(colors):
     return fig
 
 
-# 主程序
+# --- (以下是修改后的 main() 函数) ---
+
+
 def main():
     st.title("🎨 科研绘图配色推荐器")
 
@@ -192,10 +198,11 @@ def main():
             ),
         )
 
-        # 当数量选择改变时，重置滑块值
+        # 当数量选择改变时，重置滑块值和分页
         if selected_num != st.session_state.selected_num:
             st.session_state.selected_num = selected_num
             st.session_state.slider_value = 0
+            st.session_state.db_page = 0  # 重置分页
 
         # 根据选择的数量筛选
         if selected_num == "全部":
@@ -232,16 +239,15 @@ def main():
 
         with col1:
             # ID选择器
-            color_id = st.slider(
+            # 【重要修改】
+            # 将 st.slider 的 key 绑定到 'slider_value'
+            # 这样滑块和按钮就可以双向同步
+            st.slider(
                 "选择方案id",
                 min_value=0,
                 max_value=max_idx,
-                value=st.session_state.slider_value,
-                key="main_slider",
+                key="slider_value",  # 绑定到 session_state.slider_value
             )
-            # 同步slider的变化
-            if color_id != st.session_state.slider_value:
-                st.session_state.slider_value = color_id
 
         selected_colors = available_colors[st.session_state.slider_value]
         actual_id = start_idx + st.session_state.slider_value
@@ -318,7 +324,8 @@ def main():
         else:
             st.error("请输入正确的颜色格式")
 
-    # 配色数据库表格
+    # --- (以下是修改后的表格部分) ---
+
     st.markdown("---")
     st.subheader("配色数据库（点击行可查看绘图效果）")
 
@@ -337,35 +344,39 @@ def main():
         display_colors = colors_data
         display_start_id = 0
 
-    # 创建数据框，添加颜色预览列
+    # 创建数据框
     df_data = []
     for i, colors in enumerate(display_colors):
-        # 创建颜色预览HTML
-        color_preview = " ".join([f"🟦" for _ in colors])  # 使用emoji作为占位符
         df_data.append(
             {
-                "ID": display_start_id + i,
-                "颜色数": len(colors),
-                "HEX码": ", ".join(colors),
+                "方案id": display_start_id + i,
+                "所含颜色数": len(colors),
+                "颜色HEX码": ", ".join(colors),
+                # "颜色预览": " ".join(["■"] * len(colors)) # 占位符
             }
         )
 
     df = pd.DataFrame(df_data)
 
-    # 使用dataframe的selection模式
+    # 使用st.dataframe实现 *可点击* 的表格
     event = st.dataframe(
         df,
-        width="stretch",
+        use_container_width=True,  # 替换 width="stretch"
         height=400,
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
+        column_config={  # 配置列名
+            "方案id": st.column_config.NumberColumn("方案id", width="small"),
+            "所含颜色数": st.column_config.NumberColumn("所含颜色数", width="small"),
+            "颜色HEX码": st.column_config.TextColumn("颜色HEX码", width="large"),
+        },
     )
 
     # 处理行选择事件
     if len(event.selection.rows) > 0:
         selected_row_idx = event.selection.rows[0]
-        selected_id = df.iloc[selected_row_idx]["ID"]
+        selected_id = df.iloc[selected_row_idx]["方案id"]  # 确保使用正确的列名
 
         # 计算相对ID
         if show_type == "配色数据库方案id":
@@ -375,23 +386,69 @@ def main():
                 st.session_state.slider_value = relative_id
                 st.rerun()
 
-    # 显示颜色预览（在表格下方）
-    st.markdown("**颜色预览**")
-    for idx, row in df.iterrows():
-        cols = st.columns([1, 2, 10])
-        with cols[0]:
-            st.write(f"**{row['ID']}**")
-        with cols[1]:
-            st.write(f"{row['颜色数']}色")
-        with cols[2]:
-            colors_list = row["HEX码"].split(", ")
-            color_blocks = "".join(
-                [
-                    f'<div style="width:25px;height:25px;background-color:{c};display:inline-block;margin-right:3px;border:1px solid #666;"></div>'
-                    for c in colors_list
-                ]
+    # --- (【重要修改】为颜色预览添加分页) ---
+    st.markdown("**颜色预览（可滚动查看）**")
+
+    # 分页设置
+    PAGE_SIZE = 10
+    total_rows = len(df)
+    total_pages = int(np.ceil(total_rows / PAGE_SIZE))
+
+    if total_pages > 0:
+        # 分页控件
+        page_col1, page_col2, page_col3 = st.columns([2, 3, 2])
+        with page_col1:
+            if st.button("⬅️ 上一页", key="prev_page"):
+                if st.session_state.db_page > 0:
+                    st.session_state.db_page -= 1
+        with page_col2:
+            page_num_display = st.session_state.db_page + 1
+            st.markdown(
+                f"<div style='text-align: center; padding-top: 5px;'>页码: {page_num_display} / {total_pages}</div>",
+                unsafe_allow_html=True,
             )
-            st.markdown(color_blocks, unsafe_allow_html=True)
+
+            # 或者使用 st.number_input
+            # page_num = st.number_input("页码", min_value=1, max_value=total_pages, value=st.session_state.db_page + 1)
+            # st.session_state.db_page = page_num - 1
+        with page_col3:
+            if st.button("下一页 ➡️", key="next_page"):
+                if st.session_state.db_page < total_pages - 1:
+                    st.session_state.db_page += 1
+
+        # 计算当前页的数据
+        start_idx = st.session_state.db_page * PAGE_SIZE
+        end_idx = min(start_idx + PAGE_SIZE, total_rows)
+        df_page = df.iloc[start_idx:end_idx]
+
+        # 渲染表头
+        header_cols = st.columns([1, 2, 10])
+        with header_cols[0]:
+            st.markdown("**方案id**")
+        with header_cols[1]:
+            st.markdown("**所含颜色数**")
+        with header_cols[2]:
+            st.markdown("**颜色预览**")
+        st.markdown("---")
+
+        # 渲染当前页的颜色预览
+        for idx, row in df_page.iterrows():
+            cols = st.columns([1, 2, 10])
+            with cols[0]:
+                st.write(f"**{row['方案id']}**")
+            with cols[1]:
+                st.write(f"{row['所含颜色数']}色")
+            with cols[2]:
+                colors_list = row["颜色HEX码"].split(", ")
+                color_blocks = "".join(
+                    [
+                        f'<div style="width:25px;height:25px;background-color:{c};display:inline-block;margin-right:3px;border:1px solid #666;"></div>'
+                        for c in colors_list
+                    ]
+                )
+                st.markdown(color_blocks, unsafe_allow_html=True)
+    else:
+        st.write("当前筛选条件下无数据。")
 
     st.info("💡 提示：点击上方表格中的任意行，即可在页面顶部查看该配色方案的绘图效果")
 
