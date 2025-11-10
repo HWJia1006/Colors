@@ -581,7 +581,7 @@ def main():
     st.markdown(
         """
         <div style='text-align: center; color: gray;'>
-        <p>© 2021-2024, Lcpmgh, All rights reserved.</p>
+        <p>© 2021-2024, HWJia, All rights reserved.</p>
         <p>
         <a href='https://github.com/HWJia1006' target='_blank'>GitHub</a> | 
         <a href='mailto:hongwangj@gmail.com'>Email</a> | 
